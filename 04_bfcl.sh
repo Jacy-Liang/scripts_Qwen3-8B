@@ -47,15 +47,20 @@ echo "【設定】讓 BFCL 連到我自己開的 vLLM"
 echo "=============================================="
 # 這一步很重要：預設 BFCL 會自己去啟動 vLLM，但那樣它會用它自己的參數。
 # 你的研究就是在調參數，所以必須用你自己開的那個。
-export VLLM_ENDPOINT=${VLLM_ENDPOINT:-"localhost"}
-export VLLM_PORT=${VLLM_PORT:-"8000"}
+# 已用 `bfcl generate --help` 與原始碼確認（bfcl-eval 2025.12.17）：
+#   正確名稱是 LOCAL_SERVER_ENDPOINT / LOCAL_SERVER_PORT，不是 VLLM_ENDPOINT / VLLM_PORT。
+#   出處：bfcl_eval/model_handler/local_inference/base_oss_handler.py:42-43
+#   而且光設環境變數還不夠，一定要加 --skip-server-setup，否則它會自己再開一個 vLLM。
+export LOCAL_SERVER_ENDPOINT=${LOCAL_SERVER_ENDPOINT:-"localhost"}
+export LOCAL_SERVER_PORT=${LOCAL_SERVER_PORT:-"8000"}
 
-echo "  VLLM_ENDPOINT = $VLLM_ENDPOINT"
-echo "  VLLM_PORT     = $VLLM_PORT"
-echo ""
-echo "  ⚠️ 這兩個環境變數名稱要跟你的 bfcl-eval 版本對得上。"
-echo "     若跑起來發現它自己另外開了一個 vLLM，執行下面這行查正確寫法："
-echo "     bfcl generate --help"
+# 模型檔案位置。不指定的話 BFCL 會去 HF Hub 重抓 tokenizer/config，
+# 指定後直接讀本機這份，確保跟 vLLM 正在服務的是同一套檔案。
+LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-"$WORKDIR/models/Qwen3-8B"}
+
+echo "  LOCAL_SERVER_ENDPOINT = $LOCAL_SERVER_ENDPOINT"
+echo "  LOCAL_SERVER_PORT     = $LOCAL_SERVER_PORT"
+echo "  LOCAL_MODEL_PATH      = $LOCAL_MODEL_PATH"
 echo ""
 
 echo "=============================================="
@@ -64,10 +69,15 @@ echo "=============================================="
 echo "  ⚠️ 不要加 --partial-eval，正式測試要跑完整批"
 echo ""
 
+# --skip-server-setup：用上面那個我們自己開的 vLLM，不要讓 BFCL 另外啟一個。
+#   （--backend 只在沒有這個旗標時才會被用到，所以不必指定。
+#     出處：base_oss_handler.py:135 的 `if not skip_server_setup:`）
 bfcl generate \
   --model "$BFCL_MODEL" \
   --test-category multi_turn_base \
   --num-threads 1 \
+  --skip-server-setup \
+  --local-model-path "$LOCAL_MODEL_PATH" \
   2>&1 | tee "$WORKDIR/logs/bfcl_generate.log"
 
 echo ""
