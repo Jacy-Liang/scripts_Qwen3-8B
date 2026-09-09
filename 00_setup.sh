@@ -31,12 +31,16 @@ cd "$WORKDIR"
 
 pip install --upgrade pip
 
-# vLLM：釘 0.19.1。原本不指定版本會裝到 0.28.0，它硬性要求 torch 2.13.0，
-# 而 torch 2.11 以後的官方 wheel 改用 CUDA 13 建置、需要 580 以上的驅動。
-# 這台機器是 570 (CUDA 12.8)，會導致 torch.cuda.is_available() == False。
-# 0.19.1 是驅動 570 之下可用的最新版（相依 torch 2.10.0+cu128）。
-# 分界點：vllm <= 0.19.1 用 torch <= 2.10.0 (cu128)，>= 0.20.0 用 torch 2.11+ (cu13)。
-pip install "vllm==0.19.1"
+# vLLM：釘 0.28.0（相依 torch 2.13.0+cu130），需要驅動 580 以上。
+#
+# 為什麼要釘版本、又為什麼是這一版：
+#   1. 不釘版本則不可重現，pip 每次可能裝到不同版，記憶體與效能數字無從對照。
+#   2. vllm <= 0.19.1 相依 torch <= 2.10.0 (cu128)，能配舊驅動，但它打包的
+#      FlashAttention 只含 sm_80 / sm_90a 的 cubin，沒有 sm_120。RTX 5090
+#      上只能靠驅動 JIT 編譯 sm_80 的 PTX，而那份 PTX 是 ISA 8.8 (CUDA 12.9)，
+#      驅動 570 最高只吃 ISA 8.7，會噴 cudaErrorUnsupportedPtxVersion。
+#   3. 所以 5090 要用 FlashAttention，就必須配新驅動 + 新 vLLM。
+pip install "vllm==0.28.0"
 
 # 壓縮工具。一定要排在 bfcl-eval 前面：llmcompressor 會把 numpy 拉到 2.x，
 # 而 bfcl-eval 2025.12.17 釘死 numpy==1.26.4。後裝的才是最終生效的版本，
@@ -48,6 +52,11 @@ pip install "bfcl-eval==2025.12.17"
 
 # 下載模型用
 pip install "huggingface_hub[cli]"
+
+# qwen-agent（bfcl-eval 的相依）程式碼裡直接 import soundfile，但它的套件
+# metadata 沒有宣告這個相依，不補裝的話 bfcl CLI 一啟動就 ModuleNotFoundError，
+# 整個評測跑不了。這是上游打包的漏洞。
+pip install soundfile
 
 echo ""
 echo "=============================================="
@@ -71,6 +80,35 @@ if torch.cuda.is_available():
     total = torch.cuda.get_device_properties(0).total_memory / 1024**3
     print(f"  總記憶體           = {total:.2f} GB")
 PY
+
+echo ""
+echo "=============================================="
+echo "【閘門】環境不對就停在這裡，不要往下做"
+echo "=============================================="
+# 硬性檢查。之前踩過的坑：套件裝完看起來一切正常，要到第 3 步啟動 vLLM
+# 才發現驅動與 kernel 不相容，白花了一個多小時。寧可在這裡就擋下來。
+python3 - <<'GATE'
+import sys, torch
+ok = True
+if not torch.cuda.is_available():
+    print(f"  X torch 看不到 GPU。torch 編譯的 CUDA = {torch.version.cuda}，"
+          "通常是驅動比 torch 要求的舊。")
+    ok = False
+else:
+    cap = torch.cuda.get_device_capability(0)
+    sm = f"sm_{cap[0]}{cap[1]}"
+    name = torch.cuda.get_device_name(0)
+    if sm != "sm_120":
+        print(f"  X Compute Capability 是 {sm}，預期 sm_120（RTX 5090）。實際 GPU：{name}")
+        ok = False
+    else:
+        print(f"  OK {name} / {sm} / torch CUDA {torch.version.cuda}")
+if not ok:
+    print("")
+    print("  停止。請先處理驅動或樣板問題，不要繼續往下跑。")
+    sys.exit(1)
+print("  OK 環境檢查通過")
+GATE
 
 echo ""
 echo ">>> 檢查重點："
