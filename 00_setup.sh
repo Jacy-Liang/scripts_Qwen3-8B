@@ -31,14 +31,20 @@ cd "$WORKDIR"
 
 pip install --upgrade pip
 
-# vLLM：不指定版本，讓它裝最新的（Blackwell 支援還在演進中）
-pip install vllm
+# vLLM：釘 0.19.1。原本不指定版本會裝到 0.28.0，它硬性要求 torch 2.13.0，
+# 而 torch 2.11 以後的官方 wheel 改用 CUDA 13 建置、需要 580 以上的驅動。
+# 這台機器是 570 (CUDA 12.8)，會導致 torch.cuda.is_available() == False。
+# 0.19.1 是驅動 570 之下可用的最新版（相依 torch 2.10.0+cu128）。
+# 分界點：vllm <= 0.19.1 用 torch <= 2.10.0 (cu128)，>= 0.20.0 用 torch 2.11+ (cu13)。
+pip install "vllm==0.19.1"
+
+# 壓縮工具。一定要排在 bfcl-eval 前面：llmcompressor 會把 numpy 拉到 2.x，
+# 而 bfcl-eval 2025.12.17 釘死 numpy==1.26.4。後裝的才是最終生效的版本，
+# 所以 bfcl-eval 放最後，確保基準分數跑在它預期的 numpy 上。
+pip install llmcompressor
 
 # BFCL：版本必須釘死，這是可重現性的關鍵
 pip install "bfcl-eval==2025.12.17"
-
-# 壓縮工具
-pip install llmcompressor
 
 # 下載模型用
 pip install "huggingface_hub[cli]"
