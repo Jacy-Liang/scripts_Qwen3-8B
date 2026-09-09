@@ -15,7 +15,9 @@ echo "    1. GPU 名稱有沒有寫 RTX 5090"
 echo "    2. 右上角 CUDA Version 是不是 12.8 以上"
 echo "    如果 CUDA 低於 12.8，5090 可能跑不起來，要換 RunPod 樣板"
 echo ""
-read -p "確認無誤按 Enter 繼續，有問題按 Ctrl+C 中斷..." _
+# 加 || true：腳本開頭有 set -e，若用 `bash 00_setup.sh < /dev/null` 餵空輸入，
+# read 讀到 EOF 會回傳非零值，整支腳本會在這裡直接中斷、一個套件都沒裝。
+read -p "確認無誤按 Enter 繼續，有問題按 Ctrl+C 中斷..." _ || true
 
 echo ""
 echo "=============================================="
