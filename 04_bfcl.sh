@@ -13,6 +13,11 @@ cd "$WORKDIR"
 # BFCL 的模型 ID。這個字串要跟 BFCL 支援清單上寫的一模一樣
 BFCL_MODEL=${BFCL_MODEL:-"Qwen/Qwen3-8B-FC"}
 
+# 題目之間的並行數。只改變題目的執行順序，每一題的輸入與輸出完全不變，
+# 所以不影響分數，只影響總執行時間。序列執行時 vLLM 大半時間閒置。
+# 注意：若要量測單一請求的延遲，這裡要設回 1，否則數字會混入排隊時間。
+NUM_THREADS=${NUM_THREADS:-4}
+
 echo "=============================================="
 echo "【檢查】確認 bfcl-eval 版本正確"
 echo "=============================================="
@@ -79,7 +84,7 @@ echo ""
 bfcl generate \
   --model "$BFCL_MODEL" \
   --test-category multi_turn_base \
-  --num-threads 1 \
+  --num-threads "$NUM_THREADS" \
   --skip-server-setup \
   --local-model-path "$LOCAL_MODEL_PATH" \
   --allow-overwrite \
