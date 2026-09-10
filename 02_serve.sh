@@ -17,6 +17,20 @@ if [ -z "$MODEL_PATH" ] || [ -z "$TAG" ]; then
   exit 1
 fi
 
+# ---------- CUDA toolkit 路徑修正 ----------
+# RunPod 樣板的驅動是 CUDA 13，但映像檔內建的 toolkit 還是 12.8。
+# FlashInfer 用 `which nvcc` 找到 /usr/local/cuda 的 12.8，判定 < 12.9 就
+# 拒絕處理 sm_120，讓 TARGET_CUDA_ARCHS 變成空集合，最後吐出誤導的
+# "FlashInfer requires GPUs with sm75 or higher"（明明這張卡是 sm_120）。
+# 指到 pip 裝的 CUDA 13 toolkit 才能編出 compute_120f 的原生 cubin。
+if [ -z "${CUDA_HOME:-}" ]; then
+  _CU13=$(python3 -c "import os,nvidia;print(os.path.join(os.path.dirname(nvidia.__file__),'cu13'))" 2>/dev/null)
+  if [ -x "$_CU13/bin/nvcc" ]; then
+    export CUDA_HOME="$_CU13"
+    echo "  已設定 CUDA_HOME = $CUDA_HOME"
+  fi
+fi
+
 LOG="$WORKDIR/logs/serve_${TAG}.log"
 mkdir -p "$WORKDIR/logs"
 
