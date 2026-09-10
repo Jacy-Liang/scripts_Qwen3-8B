@@ -60,6 +60,41 @@ pip install soundfile
 
 echo ""
 echo "=============================================="
+echo "【修正】CUDA 工具鏈版本對齊與目錄結構"
+echo "=============================================="
+# pip 裝進來的 CUDA 13 套件彼此版本不一致，會讓 FlashInfer 的 JIT 編譯失敗。
+# nvidia-cuda-nvcc 與 nvidia-nvvm 沒有版本上限，pip 會各自解析到最新版
+# （13.4.x），但 nvidia-cuda-runtime 的標頭停在 13.0（cuda.h 裡是
+# CUDA_VERSION 13000）。cuda-toolkit 13.0.3.0 其實明確要求
+# nvidia-nvvm==13.0.88.*，是上游相依宣告不完整。
+#
+# 不修的話會依序遇到兩個錯誤，而且第二個在降完 nvcc 後才會浮現：
+#   1. CCCL 檢查編譯器與標頭版本一致：
+#      "CUDA compiler and CUDA toolkit headers are incompatible"
+#   2. nvvm 的 cicc 產生 ISA 9.4 的 PTX，但 ptxas 只吃到 9.0：
+#      "Unsupported .version 9.4; current version is '9.0'"
+#      注意 cicc 在 nvvm/bin/ 而非 bin/，nvcc --version 不會反映它的版本。
+#
+# 降編譯器而不是升 runtime：torch 是對著 CUDA 13.0 建置的，
+# 動 runtime 會牽到 torch 的執行期函式庫；動 nvcc 只影響 JIT 編譯。
+pip install "nvidia-cuda-nvcc==13.0.88" "nvidia-cuda-crt==13.0.88" \
+            "nvidia-nvvm==13.0.88"
+
+# FlashInfer 連結時傳的是 -L $CUDA_HOME/lib64，但 pip 的版面是 lib；
+# 而且 lib 裡只有 libcudart.so.13，沒有 -lcudart 需要的 libcudart.so。
+# 缺這兩個會噴 "/usr/bin/ld: cannot find -lcudart"，
+# 而且是在三個 .cu 全部編譯成功之後才失敗，很容易誤判成編譯問題。
+CU13=$(python3 -c "import os,nvidia;print(os.path.join(os.path.dirname(nvidia.__file__),'cu13'))" 2>/dev/null)
+if [ -n "$CU13" ] && [ -d "$CU13/lib" ]; then
+  ln -sfn lib "$CU13/lib64"
+  ln -sfn libcudart.so.13 "$CU13/lib/libcudart.so"
+  echo "  已建立 lib64 與 libcudart.so 連結於 $CU13"
+else
+  echo "  警告：找不到 CUDA 13 的 lib 目錄，若稍後 FlashInfer 連結失敗請手動檢查"
+fi
+
+echo ""
+echo "=============================================="
 echo "【檢查 2】裝了什麼版本（這些數字論文要寫）"
 echo "=============================================="
 python3 - <<'PY'
@@ -107,6 +142,33 @@ if not ok:
     print("")
     print("  停止。請先處理驅動或樣板問題，不要繼續往下跑。")
     sys.exit(1)
+# CUDA 工具鏈一致性：編譯器版本必須等於標頭的 CUDA_VERSION，
+# 否則 FlashInfer 的 JIT 編譯會在啟動 vLLM 時才失敗，浪費大量時間。
+import os, re, subprocess
+try:
+    import nvidia
+    cu = os.path.join(os.path.dirname(nvidia.__file__), "cu13")
+    txt = subprocess.check_output([os.path.join(cu, "bin/nvcc"), "--version"], text=True)
+    nvcc_ver = re.search(r"release (\d+\.\d+)", txt).group(1)
+    hdr = open(os.path.join(cu, "include/cuda.h")).read()
+    raw = int(re.search(r"define CUDA_VERSION\s+(\d+)", hdr).group(1))
+    hdr_ver = f"{raw // 1000}.{(raw % 1000) // 10}"
+    if nvcc_ver != hdr_ver:
+        print(f"  X CUDA 工具鏈不一致：nvcc {nvcc_ver} 對上標頭 {hdr_ver}")
+        print("    FlashInfer 的 JIT 編譯會失敗。請對齊 nvidia-cuda-nvcc /")
+        print("    nvidia-cuda-crt / nvidia-nvvm 與 nvidia-cuda-runtime 的版本。")
+        sys.exit(1)
+    print(f"  OK CUDA 工具鏈一致：nvcc 與標頭同為 {nvcc_ver}")
+    for name in ("lib64", "lib/libcudart.so"):
+        if not os.path.exists(os.path.join(cu, name)):
+            print(f"  X 缺少 {name}，FlashInfer 連結時會找不到 -lcudart")
+            sys.exit(1)
+    print("  OK lib64 與 libcudart.so 連結都在")
+except SystemExit:
+    raise
+except Exception as e:
+    print(f"  警告：CUDA 工具鏈檢查跳過（{type(e).__name__}: {e}）")
+
 print("  OK 環境檢查通過")
 GATE
 
