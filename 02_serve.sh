@@ -67,8 +67,11 @@ echo ""
 } > "$LOG"
 
 # 啟動。tee -a 是「畫面上顯示，同時附加到檔案」
+# --served-model-name 給兩個名稱：TAG 是實驗標籤（也是 metrics 的 model_name），
+# MODEL_PATH 是別名，讓 BFCL 能定址得到。BFCL 送出的 model 欄位是模型路徑
+# （有 --local-model-path 時）或 HF id，跟 TAG 對不上就會回 404 NotFoundError。
 vllm serve "$MODEL_PATH" \
-  --served-model-name "$TAG" \
+  --served-model-name "$TAG" "$MODEL_PATH" \
   --port "$PORT" \
   --gpu-memory-utilization "$GPU_UTIL" \
   --max-model-len "$MAX_LEN" \
