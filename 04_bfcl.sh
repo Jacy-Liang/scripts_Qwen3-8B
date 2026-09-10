@@ -69,6 +69,10 @@ echo "=============================================="
 echo "  ⚠️ 不要加 --partial-eval，正式測試要跑完整批"
 echo ""
 
+# --allow-overwrite：允許覆寫舊結果。BFCL 看到結果檔存在就會整批跳過，
+#   印出 "All selected test cases have been previously generated"，
+#   於是失敗那次留下的錯誤結果會被當成有效結果沿用。注意這跟
+#   --partial-eval 完全不同：題目仍然跑滿整批，只是不沿用舊檔。
 # --skip-server-setup：用上面那個我們自己開的 vLLM，不要讓 BFCL 另外啟一個。
 #   （--backend 只在沒有這個旗標時才會被用到，所以不必指定。
 #     出處：base_oss_handler.py:135 的 `if not skip_server_setup:`）
@@ -78,6 +82,7 @@ bfcl generate \
   --num-threads 1 \
   --skip-server-setup \
   --local-model-path "$LOCAL_MODEL_PATH" \
+  --allow-overwrite \
   2>&1 | tee "$WORKDIR/logs/bfcl_generate.log"
 
 echo ""
