@@ -39,7 +39,31 @@ GPU_UTIL=${GPU_UTIL:-0.85}        # 最多用幾成顯卡記憶體。先保守�
 MAX_LEN=${MAX_LEN:-16384}         # 單次最長 context。一定要設！見下方說明
 MAX_SEQS=${MAX_SEQS:-8}           # 同時最多處理幾個請求
 PORT=${PORT:-8000}
+KV_BYTES=${KV_BYTES:-}            # 直接指定 KV cache 大小（bytes）。空的 = 交給 gpu_util 推算
 # ---------------------------------------------------
+
+# 為什麼要能固定 KV_BYTES：
+#   用 gpu_util 推算時，vLLM 會在啟動時量測記憶體，而冷啟動的 torch.compile
+#   就發生在量測期間，編譯用掉的記憶體被算成模型開銷。同設定下冷啟動
+#   KV 8.86 GiB、暖啟動 10.96 GiB（2026-10-12 同機實測），數字不可重現。
+#   設了 --kv-cache-memory-bytes 就跳過量測，KV 照給的數字配置，
+#   但 --gpu-memory-utilization 會被忽略，放不放得下要自己負責。
+#
+# 為什麼只收純數字：
+#   vLLM 雖然接受 10G / 10g 這種寫法，但大寫是 2^30、小寫是 10^9，
+#   10G = 10 GiB、10g = 9.31 GiB，差一個字母就差 0.69 GiB；
+#   "10GiB" 則根本不被接受。一律寫 bytes，例：10 GiB = 10737418240
+KV_ARGS=()
+if [ -n "$KV_BYTES" ]; then
+  if ! [[ "$KV_BYTES" =~ ^[0-9]+$ ]]; then
+    echo "KV_BYTES 只接受純數字的 bytes（例：10737418240 = 10 GiB），收到：$KV_BYTES"
+    exit 1
+  fi
+  KV_ARGS=(--kv-cache-memory-bytes "$KV_BYTES")
+  KV_DESC="$KV_BYTES bytes ($(awk -v b="$KV_BYTES" 'BEGIN{printf "%.2f", b/2^30}') GiB)，gpu_util 不生效"
+else
+  KV_DESC="（未指定，由 gpu_util 推算）"
+fi
 
 # 為什麼一定要設 MAX_LEN：
 #   Qwen3-4B 原生 context 是 262,144。如果不設，vLLM 會照那個長度
@@ -52,6 +76,7 @@ echo "  模型      : $MODEL_PATH"
 echo "  gpu_util  : $GPU_UTIL"
 echo "  max_len   : $MAX_LEN"
 echo "  max_seqs  : $MAX_SEQS"
+echo "  kv_bytes  : $KV_DESC"
 echo "  log 存到  : $LOG"
 echo ""
 
@@ -63,6 +88,8 @@ echo ""
   echo "gpu_util : $GPU_UTIL"
   echo "max_len  : $MAX_LEN"
   echo "max_seqs : $MAX_SEQS"
+  echo "kv_bytes : $KV_DESC"
+  echo "compile_cache_disabled : ${VLLM_DISABLE_COMPILE_CACHE:-0}"
   echo "===================="
 } > "$LOG"
 
@@ -76,6 +103,7 @@ vllm serve "$MODEL_PATH" \
   --gpu-memory-utilization "$GPU_UTIL" \
   --max-model-len "$MAX_LEN" \
   --max-num-seqs "$MAX_SEQS" \
+  "${KV_ARGS[@]}" \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
   2>&1 | tee -a "$LOG"
